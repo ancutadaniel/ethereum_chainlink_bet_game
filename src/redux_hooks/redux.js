@@ -13,7 +13,7 @@ const {
 } = ACTIONS;
 
 export const reducer = (state, action) => {
-  console.log('type: ', action.type, ' <===> value:', action.value);
+  // console.log('type: ', action.type, ' <===> value:', action.value);
   switch (action.type) {
     case SET_WEB3:
       const { web3, contract, account, loading, balance, maxBet } =

@@ -121,8 +121,6 @@ const App = () => {
     loadWeb3();
   }, [loadWeb3]);
 
-  console.log('state', state);
-
   return (
     <div className='App'>
       <MainMenu account={account} />
