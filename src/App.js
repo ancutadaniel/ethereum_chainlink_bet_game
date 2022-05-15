@@ -1,182 +1,189 @@
-import React, { useEffect, useState } from 'react';
+import { useCallback, useEffect, useReducer } from 'react';
+import { reducer } from './redux_hooks/redux';
+import { defaultState } from './redux_hooks/state';
+import * as ACTIONS from './redux_hooks/constants';
+
 import getWeb3 from './utils/getWeb3';
 
 import VRFD2 from '../src/build/abi/VRFD2.json';
 import MainMenu from './components/Menu';
-import Loading from './components/Loading';
 import Main from './components/Main';
 
-import {
-  Container,
-  Divider,
-  Message,
-  Segment,
-  Dimmer,
-  Loader,
-} from 'semantic-ui-react';
+import { Container, Divider, Message, Button, Icon } from 'semantic-ui-react';
 
 const App = () => {
-  const [accounts, setAccounts] = useState([]);
-  const [contract, setContract] = useState({});
-  const [balance, setBalance] = useState();
-  const [maxBet, setMaxBet] = useState();
-  const [amount, setAmount] = useState();
+  const [state, dispatch] = useReducer(reducer, defaultState);
+  const {
+    errors,
+    account,
+    contractAddress,
+    wrongNetwork,
+    diceRolled,
+    diceClose,
+  } = state;
+  const {
+    SET_WEB3,
+    SET_ERROR,
+    ACCOUNT_CHANGE,
+    TOGGLE_NETWORK,
+    NETWORK_CHANGE,
+    SET_DICE_MESSAGE,
+  } = ACTIONS;
 
-  const [web3, setWeb3] = useState({});
-
-  const [netId, setNetworkId] = useState();
-  const [wrongNetwork, setWrongNetwork] = useState(false);
-  const [errors, setError] = useState();
-  const [loading, setLoading] = useState(true);
-  const [diceRolled, setDiceRolled] = useState({});
-  const [bet, setBet] = useState();
-
-  const contractAddress = '0xABdBFF30838d4946B693A6a2798CaeA067660a6E'; // rinkeby
-
-  const loadWeb3 = async () => {
+  const loadWeb3 = useCallback(async () => {
     try {
       const web3 = await getWeb3();
-      let getAccounts, getBalance, getMaxBet, networkId;
       if (web3) {
-        getAccounts = await web3.eth.getAccounts();
-        networkId = await web3.eth.net.getId();
-
-        networkId !== 4 ? setWrongNetwork(true) : setWrongNetwork(false);
-
+        const getAccounts = await web3.eth.getAccounts();
+        // create a new instance of the contract - on that specific address
         const contractData = await new web3.eth.Contract(
           VRFD2.abi,
           contractAddress
         );
 
-        getBalance = await web3.eth.getBalance(getAccounts[0]);
-        getMaxBet = await web3.eth.getBalance(contractAddress);
+        const getBalance = await web3.eth.getBalance(getAccounts[0]);
+        const getMaxBet = await web3.eth.getBalance(contractAddress);
 
-        setContract(contractData);
-        setBalance(getBalance);
-        setMaxBet(getMaxBet);
-        setNetworkId(networkId);
+        dispatch({
+          type: SET_WEB3,
+          value: {
+            web3: web3,
+            contract: contractData,
+            account: getAccounts,
+            balance: getBalance,
+            maxBet: getMaxBet,
+            loading: false,
+          },
+        });
+
+        // listen to account change
+        window.ethereum.on('accountsChanged', async (acc) => {
+          const [newAddress] = acc;
+          try {
+            if (Object.keys(web3).length !== 0 && contractData) {
+              console.log(newAddress);
+              const getNewBalance = await web3.eth.getBalance(newAddress);
+              const getNewMaxBet = await web3.eth.getBalance(
+                contractData.options.address
+              );
+
+              dispatch({
+                type: ACCOUNT_CHANGE,
+                value: { getNewBalance, getNewMaxBet, newAddress },
+              });
+            }
+          } catch (error) {
+            dispatch({ type: SET_ERROR, value: error });
+          }
+        });
+
+        // listen to chain change
+        window.ethereum.on('chainChanged', async (chainId) => {
+          try {
+            let networkId = parseInt(chainId, 16);
+            networkId !== 4 && dispatch({ type: TOGGLE_NETWORK });
+
+            if (networkId === 4) {
+              const [getNetAccounts] = await web3.eth.getAccounts();
+              const getNetBalance = await web3.eth.getBalance(getAccounts[0]);
+              const getNetMaxBet = await web3.eth.getBalance(contractAddress);
+
+              dispatch({
+                type: NETWORK_CHANGE,
+                value: {
+                  getNetBalance,
+                  getNetAccounts,
+                  getNetMaxBet,
+                  networkId,
+                },
+              });
+            }
+          } catch (error) {
+            dispatch({ type: SET_ERROR, value: error });
+          }
+        });
       } else {
         alert('Smart contract not deployed to selected network');
       }
-
-      window.ethereum.on('accountsChanged', async (acc) => {
-        if (typeof acc[0] !== 'undefined' && acc[0] !== null) {
-          getBalance = await web3.eth.getBalance(acc[0]);
-          getMaxBet = await web3.eth.getBalance(contractAddress);
-
-          setBalance(getBalance);
-          setMaxBet(getMaxBet);
-          setAccounts(acc);
-        }
-      });
-
-      window.ethereum.on('chainChanged', async (chainId) => {
-        networkId = parseInt(chainId, 16);
-        networkId !== 4 ? setWrongNetwork(true) : setWrongNetwork(false);
-
-        if (networkId === 4) {
-          getAccounts = await web3.eth.getAccounts();
-          getBalance = await web3.eth.getBalance(getAccounts[0]);
-          getMaxBet = await web3.eth.getBalance(contractAddress);
-          setBalance(getBalance);
-          setMaxBet(getMaxBet);
-        }
-        setNetworkId(networkId);
-      });
-
-      setWeb3(web3);
-      setAccounts(getAccounts);
-      setLoading(false);
     } catch (error) {
-      setError(error);
+      dispatch({ type: SET_ERROR, value: error });
     }
-  };
-
-  const makeBet = async (bet) => {
-    setBet(bet);
-    try {
-      //Send bet to the contract and wait for the verdict
-      setLoading(true);
-      const data = await contract.methods
-        .rollDice(accounts[0])
-        .send({ from: accounts[0] });
-
-      if (data) {
-        setDiceRolled(data);
-        setLoading(false);
-      }
-    } catch (error) {
-      setError(error);
-    }
-  };
-
-  const getValueOracle = async () => {
-    setLoading(true);
-    try {
-      const data = await contract.methods?.game(accounts[0], bet).send({
-        from: accounts[0],
-        value: amount,
-      });
-      console.log(data);
-      setLoading(false);
-    } catch (error) {
-      setError(error);
-    }
-  };
-
-  const onValueChange = (e) => setAmount(e.target.value);
-
-  useEffect(() => {
-    console.log(contract);
-    getValueOracle();
-  }, [diceRolled]);
+  }, [
+    SET_ERROR,
+    SET_WEB3,
+    ACCOUNT_CHANGE,
+    NETWORK_CHANGE,
+    TOGGLE_NETWORK,
+    contractAddress,
+  ]);
 
   useEffect(() => {
     loadWeb3();
-  }, []);
+  }, [loadWeb3]);
+
+  console.log('state', state);
 
   return (
     <div className='App'>
-      <MainMenu account={accounts[0]} />
+      <MainMenu account={account} />
       <Divider horizontal>§</Divider>
-
-      <Container>
-        {loading && Object.keys(web3).length > 0 ? (
-          <Loading balance={balance} web3={web3} maxBet={maxBet} />
-        ) : (
-          <Main
-            balance={balance}
-            web3={web3}
-            maxBet={maxBet}
-            onValueChange={onValueChange}
-            amount={amount}
-            makeBet={makeBet}
-          />
-        )}
-      </Container>
-
+      <Main state={state} dispatch={dispatch} />
       <Container>
         {errors && (
           <>
             <Divider horizontal>§</Divider>
             <Message negative>
-              <Message.Header>Code: {errors?.code}</Message.Header>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Message.Header>Code: {errors?.code}</Message.Header>
+                <Button
+                  style={{
+                    padding: '0px',
+                    background: 'none',
+                    color: 'red',
+                    marginRight: '0px',
+                  }}
+                  onClick={() => dispatch({ type: SET_ERROR, value: null })}
+                >
+                  <Icon name='close' />
+                </Button>
+              </div>
               <p style={{ wordBreak: 'break-word' }}>{errors?.message}</p>
             </Message>
           </>
         )}
         {wrongNetwork && (
-          <Message negative>
-            <Message.Header>Wrong Network</Message.Header>
-            <p>Please select from Metamask - Rinkeby Test Network (id 4)</p>
-          </Message>
+          <>
+            <Divider horizontal>§</Divider>
+            <Message negative>
+              <Message.Header>Wrong Network</Message.Header>
+              <p>Please select from Metamask - Rinkeby Test Network (id 4)</p>
+            </Message>
+          </>
         )}
-        <Divider horizontal>§</Divider>
-        {diceRolled?.events?.DiceRolled && (
-          <Message positive>
-            <Message.Header>Dice Rolled</Message.Header>
-            <p>Dice was rolled wait for oracle to pick the winner</p>
-          </Message>
+        {diceRolled?.events?.DiceRolled && !diceClose && (
+          <>
+            <Divider horizontal>§</Divider>
+            <Message positive>
+              <Message.Header>Dice Rolled</Message.Header>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Message.Header>Code: {errors?.code}</Message.Header>
+                <Button
+                  style={{
+                    padding: '0px',
+                    background: 'none',
+                    color: 'green',
+                    marginRight: '0px',
+                  }}
+                  onClick={() =>
+                    dispatch({ type: SET_DICE_MESSAGE, value: null })
+                  }
+                >
+                  <Icon name='close' />
+                </Button>
+              </div>
+              <p>Dice was rolled wait for oracle to pick the winner</p>
+            </Message>
+          </>
         )}
       </Container>
     </div>

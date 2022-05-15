@@ -1,0 +1,16 @@
+export const defaultState = {
+  web3: {},
+  contract: {},
+  contractAddress: `0xcbe499702b507cABcbf70455df4a49EB8fFA0D5b`,
+  account: '',
+  balance: 0,
+  maxBet: 0,
+  amount: '',
+  diceRolled: null,
+  bet: 0,
+  wrongNetwork: false,
+  networkID: null,
+  loading: true,
+  errors: null,
+  diceClose: false,
+};

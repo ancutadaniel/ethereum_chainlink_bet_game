@@ -10,30 +10,84 @@ import {
 } from 'semantic-ui-react';
 import eth from '../logos/eth.png';
 import dice from '../logos/dice.webp';
+import dice_rolling from '../logos/dice_rolling.gif';
+import * as ACTIONS from '../redux_hooks/constants';
+import { useCallback } from 'react';
 
-const Main = ({ balance, web3, maxBet, onValueChange, amount, makeBet }) => {
-  const handleLow = (e) => {
-    e.preventDefault();
-    //start with digit, digit+dot* or single dot*, end with digit.
-    const reg = /^[0-9]*.?[0-9]+$/;
-    if (reg.test(amount)) {
-      makeBet(0, web3.utils.toWei(amount.toString()));
+const Main = ({ state, dispatch }) => {
+  const { account, contract, balance, web3, maxBet, amount, bet, loading } =
+    state;
+  const { SET_ERROR, SET_AMOUNT, DICE_ROLLED, SET_LOADING, BET } = ACTIONS;
+
+  const handleLow = () => {
+    if (amount) {
+      makeBets();
+      dispatch({ type: BET, value: 0 });
     } else {
-      window.alert('Please type positive integer or float numbers');
+      dispatch({
+        type: SET_ERROR,
+        value: `Please type positive integer or float numbers`,
+      });
     }
   };
 
-  const handleHigh = (e) => {
-    e.preventDefault();
-    //start with digit, digit+dot* or single dot*, end with digit.
-    const reg = /^[0-9]*.?[0-9]+$/;
-    if (reg.test(amount)) {
-      makeBet(1, web3.utils.toWei(amount.toString()));
+  const handleHigh = () => {
+    if (amount) {
+      makeBets();
+      dispatch({ type: BET, value: 1 });
     } else {
-      window.alert(
-        'Please make sure that:\n*You typed positive integer or float number\n* Typed value is >= than MinBet (not all ETH decimals visible)\n* You are using Rinkeby network'
-      );
+      dispatch({
+        type: SET_ERROR,
+        value: `Please make sure that:\n*You typed positive integer or float number\n* Typed value is >= than MinBet (not all ETH decimals visible)\n* You are using Rinkeby network`,
+      });
     }
+  };
+
+  const makeBets = async () => {
+    dispatch({ type: SET_LOADING });
+    try {
+      //Send bet to the contract and wait for the verdict
+      const data = await contract.methods
+        .rollDice(account)
+        .send({ from: account });
+      if (data) {
+        dispatch({ type: DICE_ROLLED, value: data });
+        getValueOracle();
+      }
+    } catch (error) {
+      dispatch({ type: SET_ERROR, value: error });
+    }
+  };
+
+  const getValueOracle = useCallback(async () => {
+    dispatch({ type: SET_LOADING });
+    try {
+      const betValue = web3.utils.toWei(bet.toString());
+      const data = await contract.methods?.game(account, betValue).send({
+        from: account,
+        value: amount,
+      });
+
+      console.log('oracle', data);
+
+      if (data) dispatch({ type: SET_LOADING });
+    } catch (error) {
+      dispatch({ type: SET_ERROR, value: error });
+    }
+  }, [
+    SET_ERROR,
+    SET_LOADING,
+    account,
+    amount,
+    bet,
+    contract.methods,
+    web3,
+    dispatch,
+  ]);
+
+  const handleAmount = (e) => {
+    const amountWei = web3.utils.toWei(e.target.value, 'ether');
+    dispatch({ type: SET_AMOUNT, value: amountWei });
   };
 
   let maxValue = 0;
@@ -47,7 +101,10 @@ const Main = ({ balance, web3, maxBet, onValueChange, amount, makeBet }) => {
   return (
     <Container>
       <Card centered style={{ width: '350px' }}>
-        <Image src={dice} wrapped ui={false} />
+        <Image src={`${!loading ? dice : dice_rolling}`} wrapped ui={false} />
+        <Dimmer inverted active={loading}>
+          <Loader />
+        </Dimmer>
         <Card.Content>
           <Card.Description
             style={{
@@ -57,18 +114,23 @@ const Main = ({ balance, web3, maxBet, onValueChange, amount, makeBet }) => {
             }}
           >
             <Input
-              placeholder='Place Eth Bid...'
+              placeholder={`${!loading ? 'Place Eth Bid...' : 'rolling...'}`}
               style={{ width: '270px' }}
-              onChange={onValueChange}
-              type='number'
-              min='0'
+              onChange={handleAmount}
+              type='text'
             />
             <Image src={eth} style={{ width: '15px' }} />
             <p>ETH</p>
           </Card.Description>
           <Divider horizontal>§</Divider>
           <Button.Group style={{ display: 'flex', marginBottom: '20px' }}>
-            <Button name='buy' color='red' onClick={handleLow} type='submit'>
+            <Button
+              name='buy'
+              color='red'
+              onClick={handleLow}
+              type='button'
+              disabled={+amount <= 0 || loading}
+            >
               Low
             </Button>
             <Button.Or />
@@ -76,42 +138,37 @@ const Main = ({ balance, web3, maxBet, onValueChange, amount, makeBet }) => {
               name='sell'
               color='green'
               onClick={handleHigh}
-              type='submit'
+              type='button'
+              disabled={+amount <= 0 || loading}
             >
               High
             </Button>
           </Button.Group>
         </Card.Content>
         <Card.Content>
-          {!balance ? (
-            <Dimmer active>
-              <Loader size='medium'>Loading</Loader>
-            </Dimmer>
-          ) : (
-            <Container
-              style={{
-                display: 'flex',
-                justifyContent: 'space-evenly',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <b>MaxBet:</b>
-              </div>
-              <div>
-                {maxValue}
-                <b> ETH</b>
-              </div>
-              <br></br>
-              <div>
-                <b>Balance:</b>
-              </div>
-              <div>
-                {balanceValue}
-                <b> ETH</b>
-              </div>
-            </Container>
-          )}
+          <Container
+            style={{
+              display: 'flex',
+              justifyContent: 'space-evenly',
+              alignItems: 'center',
+            }}
+          >
+            <div>
+              <b>MaxBet:</b>
+            </div>
+            <div>
+              {maxValue}
+              <b> ETH</b>
+            </div>
+            <br></br>
+            <div>
+              <b>Balance:</b>
+            </div>
+            <div>
+              {balanceValue}
+              <b> ETH</b>
+            </div>
+          </Container>
         </Card.Content>
       </Card>
     </Container>
